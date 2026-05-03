@@ -8,6 +8,14 @@ from app.tasks.llm_tasks import llm_request
 
 router = Router()
 
+@router.message(Command("start"))
+async def start(message: Message):
+    await message.answer(
+        "Это бот с доступом к большой языковой модели по JWT-токену.\n"
+        "Сначала отправьте токен командой: /token <JWT>\n"
+        "Потом просто напишите вопрос, и я передам его в LLM через очередь RabbitMQ."
+    )
+
 
 @router.message(Command("token"))
 async def set_token(message: Message):

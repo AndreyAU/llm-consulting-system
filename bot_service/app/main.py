@@ -1,17 +1,13 @@
-import asyncio
+from fastapi import FastAPI
 
-from aiogram import Bot
-
-from app.bot.dispatcher import create_dispatcher
 from app.core.config import settings
 
-
-async def main():
-    bot = Bot(token=settings.telegram_bot_token)
-    dp = create_dispatcher()
-
-    await dp.start_polling(bot)
+app = FastAPI(title=settings.app_name)
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+    }
