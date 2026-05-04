@@ -2,19 +2,18 @@
 
 ## 📌 Описание проекта
 
-Проект представляет собой двухсервисную систему для работы с LLM (Large Language Model):
+Проект представляет собой двухсервисную систему для работы с LLM (Large Language Model) с использованием JWT-аутентификации и асинхронной обработки запросов.
 
-- Auth Service — регистрация, логин, JWT
-- Bot Service — (будет реализован далее) работа с пользователем и LLM
+Система состоит из:
 
-Сервисы независимы:
-- Auth Service не связан с ботом
-- Bot Service не хранит пользователей
-- Взаимодействие только через JWT
+- Auth Service — регистрация пользователей, логин и выпуск JWT
+- Bot Service — Telegram-бот, принимающий запросы пользователей и отправляющий их в LLM через очередь
+
+Сервисы полностью изолированы и взаимодействуют только через JWT.
 
 ---
 
-## 🏗 Архитектура
+## 🏗 Архитектура системы
 
 ### Auth Service
 - Регистрация пользователя
@@ -23,11 +22,19 @@
 - Проверка токена
 - Endpoint /auth/me
 
-### Bot Service (в разработке)
-- Принимает JWT
-- Проверяет токен
-- Работает с LLM
-- Не хранит пользователей
+### Bot Service
+- Принимает JWT от пользователя
+- Валидирует токен (подпись + срок)
+- Сохраняет токен в Redis
+- Принимает сообщения из Telegram
+- Публикует задачи в RabbitMQ
+- Не выполняет запрос к LLM напрямую
+
+### Асинхронная обработка
+- Bot Service → отправляет задачу
+- RabbitMQ → очередь сообщений
+- Celery Worker → обрабатывает задачу
+- OpenRouter API → получает ответ LLM
 
 ---
 
@@ -39,78 +46,66 @@
 - SQLite
 - JWT (python-jose)
 - Passlib (bcrypt)
-- Pytest
+- Aiogram
+- Redis
+- RabbitMQ
+- Celery
 - HTTPX
+- Pytest
+- Fakeredis
+- Pytest-mock
+- Respx
 
 ---
+
 ## 🚀 Запуск проекта
 
-1. Клонировать репозиторий
-
-git clone https://github.com/AndreyAU/llm-consulting-system.git
-
-2. Перейти в папку сервиса
-
-cd llm-consulting-system/auth_service
-
-3. Установить зависимости
-
-uv sync
-
-4. Запустить сервер
-
-uv run uvicorn app.main:app --reload
-
-5. Открыть Swagger
-
-http://127.0.0.1:8000/docs
+git clone https://github.com/AndreyAU/llm-consulting-system.git  
+cd llm-consulting-system  
+docker compose up --build  
 
 ---
 
 ## 🔐 API Auth Service
 
-POST /auth/register — регистрация  
-POST /auth/login — получение JWT  
-GET /auth/me — данные пользователя по токену  
+- POST /auth/register — регистрация  
+- POST /auth/login — получение JWT  
+- GET /auth/me — данные пользователя по токену  
+
+Swagger:  
+http://127.0.0.1:8000/docs  
+
+---
+
+## 🤖 Сценарий работы Telegram-бота
+
+1. Пользователь запускает бота (/start)  
+2. Отправляет JWT: /token <JWT>  
+3. Бот сохраняет токен в Redis  
+4. Пользователь отправляет запрос  
+5. Бот валидирует JWT  
+6. Бот отправляет задачу в RabbitMQ  
+7. Celery Worker обрабатывает задачу  
+8. Ответ возвращается пользователю  
 
 ---
 
 ## 🧪 Тестирование
 
-### Модульные тесты
+### Auth Service
 
-Файл: tests/test_security.py
-
-Проверяют:
+Модульные тесты:
 - hash_password
 - verify_password
 - create_access_token
 - decode_token
-- наличие полей sub, role, iat, exp
 
----
+Интеграционные тесты:
+- регистрация
+- логин
+- /auth/me
 
-### Интеграционные тесты
-
-Файл: tests/test_auth_api.py
-
-Проверяется полный сценарий:
-
-1. POST /auth/register
-2. POST /auth/login
-3. GET /auth/me (с токеном)
-
-Используется:
-- in-memory SQLite
-- httpx ASGITransport
-- override зависимостей
-
----
-
-### Негативные тесты
-
-Проверяются:
-
+Негативные тесты:
 - повторная регистрация → 409
 - неверный пароль → 401
 - нет токена → 401
@@ -118,9 +113,29 @@ GET /auth/me — данные пользователя по токену
 
 ---
 
+### Bot Service
+
+Модульные тесты:
+- проверка JWT
+- обработка ошибок
+
+Мок-тесты:
+- fakeredis
+- pytest-mock
+
+Проверяется:
+- сохранение токена
+- отказ без токена
+- вызов Celery
+
+Интеграционные тесты:
+- respx
+- проверка OpenRouter
+
+---
 ## 📸 Скриншоты
 
-### Swagger UI
+### Swagger Auth Service
 ![Swagger](docs/images/swagger_main.png)
 
 ### Регистрация
@@ -132,22 +147,37 @@ GET /auth/me — данные пользователя по токену
 ### /auth/me
 ![Me](docs/images/auth_me_success.png)
 
-### Тесты
-![Tests](docs/images/auth_tests_passed.png)
+### Тесты Auth
+![Auth Tests](docs/images/auth_tests_passed.png)
 
 ---
 
-## 🔑 Сценарий работы
-
-1. Пользователь регистрируется
-2. Логинится
-3. Получает JWT
-4. Использует токен для /auth/me
-5. Передаёт токен в Bot Service
+### Telegram Bot (workflow)
+![Telegram](docs/images/telegram_bot_workflow.png)
 
 ---
 
-## 📌 Пример пользователя
+### RabbitMQ (очереди и активность)
+![RabbitMQ](docs/images/rabbitmq_activity_example.png)
+
+---
+
+### Тесты Bot Service (общие)
+![Bot Tests](docs/images/bot_tests_success.png)
+
+---
+
+### Тесты обработчиков (handlers)
+![Handlers Tests](docs/images/bot_handlers_tests_success.png)
+
+---
+
+### Полный прогон тестов Bot Service
+![All Bot Tests](docs/images/bot_all_tests_success.png)
+
+---
+
+## 🔑 Пример пользователя
 
 andreenko@email.com
 
@@ -155,12 +185,15 @@ andreenko@email.com
 
 ## 📊 Соответствие требованиям
 
-✔ Разделение сервисов  
-✔ JWT только в Auth Service  
-✔ Пароли хешируются  
-✔ /auth/me защищён  
-✔ Тесты реализованы  
-✔ Swagger работает  
+✔ Разделение на два сервиса  
+✔ JWT создаётся только в Auth Service  
+✔ Bot Service валидирует токен  
+✔ Redis используется  
+✔ RabbitMQ используется  
+✔ Celery используется  
+✔ Асинхронная обработка реализована  
+✔ Тесты реализованы и проходят  
+✔ Все сценарии подтверждены скриншотами  
 
 ---
 
@@ -172,7 +205,7 @@ JWT содержит:
 - iat
 - exp
 
-Пароли не хранятся в открытом виде
+Пароли хешируются и не хранятся в открытом виде.
 
 ---
 
